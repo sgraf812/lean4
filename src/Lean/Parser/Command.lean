@@ -131,14 +131,18 @@ def declSig := leading_parser
   many (ppSpace >> (Term.binderIdent <|> Term.bracketedBinder)) >> Term.typeSpec
 /-- The `require P` precondition clause of a `def` contract. -/
 def requireClause := leading_parser
-  ppDedent (ppLine >> "require " >> termParser)
+  ppDedent (ppLine >> nonReservedSymbol "require" >> ppSpace >> termParser)
 /-- The `ensures b => Q` postcondition clause of a `def` contract, binding the result `b`. -/
 def ensuresClause := leading_parser
-  ppDedent (ppLine >> "ensures " >> Term.basicFun)
+  ppDedent (ppLine >> nonReservedSymbol "ensures" >> ppSpace >> Term.basicFun)
+/-- The `: type` of a `def` that may carry contract clauses; forbids `require`/`ensures` in the type
+so the non-reserved clause keywords are not swallowed as applications. -/
+def defTypeSpec := leading_parser
+  " : " >> withForbidden "require" (withForbidden "ensures" termParser)
 /-- `optDeclSig` matches the signature of a declaration with optional type: a list of binders and then possibly `: type` -/
 -- @[builtin_doc] -- FIXME: suppress the hover
 def optDeclSig := leading_parser
-  many (ppSpace >> (Term.binderIdent <|> Term.bracketedBinder)) >> Term.optType >>
+  many (ppSpace >> (Term.binderIdent <|> Term.bracketedBinder)) >> optional defTypeSpec >>
   optional requireClause >> optional ensuresClause
 /-- Right-hand side of a `:=` in a declaration, a term. -/
 def declBody : Parser :=

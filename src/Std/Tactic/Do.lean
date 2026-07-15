@@ -8,7 +8,6 @@ module
 prelude
 public import Std.Tactic.Do.ProofMode
 public import Std.Tactic.Do.Syntax
-public import Std.Tactic.Do.Contract
 
 @[expose] public section
 

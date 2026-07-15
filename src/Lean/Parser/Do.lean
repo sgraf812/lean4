@@ -175,14 +175,16 @@ def doIfCond    :=
 @[builtin_doElem_parser] def doUnless := leading_parser
   "unless " >> withForbidden "do" termParser >> " do " >> doSeq
 def doForDecl := leading_parser
-  optional (atomic (ident >> " : ")) >> termParser >> " in " >> withForbidden "do" termParser
+  optional (atomic (ident >> " : ")) >> termParser >> " in " >>
+    withForbidden "do" (withForbidden "invariant" termParser)
 /--
 The optional `invariant cur => e` clause of a `for` loop. The invariant annotates the loop so
 `vcgen` reads it from the program, with `cur` bound to the iteration cursor and mutable variables
 referenced by name.
 -/
 def doForInvariant := leading_parser
-  ppSpace >> "invariant " >> withForbidden "do" (funBinder >> " => " >> termParser)
+  ppSpace >> nonReservedSymbol "invariant" >> ppSpace >>
+    withForbidden "do" (funBinder >> " => " >> termParser)
 /--
 `for x in e do s` iterates over `e` assuming `e`'s type has an instance of the `ForIn` typeclass.
 `break` and `continue` are supported inside `for` loops.

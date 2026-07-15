@@ -47,6 +47,11 @@ private theorem foldl_push_toList {γ : Type u₁} (xs : List γ) (acc : Array �
     (List.range' r.start r.size r.step)).toList = r.toList
   rw [foldl_push_toList]; simp [Std.Legacy.Range.toList, Std.Legacy.Range.size]
 
+/-- Conjoin two loop invariants pointwise. Used to combine several `invariant` clauses on one loop. -/
+@[simp, grind] noncomputable def Invariant.and {l : List α} (inv₁ inv₂ : Invariant l β Pred) :
+    Invariant l β Pred :=
+  fun cur s => inv₁ cur s ⊓ inv₂ cur s
+
 set_option linter.unusedVariables false in
 /-- A `forIn` loop annotated with its loop invariant, which `vcgen` reads from the `inv` argument.
 It is definitionally `forIn xs init f`, so the annotation is erased at runtime. The invariant
