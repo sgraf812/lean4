@@ -177,6 +177,13 @@ def doIfCond    :=
 def doForDecl := leading_parser
   optional (atomic (ident >> " : ")) >> termParser >> " in " >> withForbidden "do" termParser
 /--
+The optional `invariant cur => e` clause of a `for` loop. The invariant annotates the loop so
+`vcgen` reads it from the program, with `cur` bound to the iteration cursor and mutable variables
+referenced by name.
+-/
+def doForInvariant := leading_parser
+  ppSpace >> "invariant " >> withForbidden "do" (funBinder >> " => " >> termParser)
+/--
 `for x in e do s` iterates over `e` assuming `e`'s type has an instance of the `ForIn` typeclass.
 `break` and `continue` are supported inside `for` loops.
 `for x in e, x2 in e2, ... do s` iterates over the given collections in parallel,
@@ -184,7 +191,7 @@ until at least one of them is exhausted.
 The types of `e2` etc. must implement the `Std.ToStream` typeclass.
 -/
 @[builtin_doElem_parser] def doFor    := leading_parser
-  "for " >> sepBy1 doForDecl ", " >> "do " >> doSeq
+  "for " >> sepBy1 doForDecl ", " >> optional doForInvariant >> "do " >> doSeq
 
 def dependentParam := leading_parser
   atomic ("(" >> nonReservedSymbol "dependent") >> " := " >>

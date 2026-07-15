@@ -9,6 +9,7 @@ prelude
 public import Lean.Elab.BuiltinDo.Basic
 meta import Lean.Parser.Do
 import Init.Control.Do
+import Init.While
 import Lean.Meta.ProdN
 
 public section
@@ -20,10 +21,13 @@ open Lean.Meta
 
 @[builtin_macro Lean.Parser.Term.doFor] def expandDoFor : Macro := fun stx => do
   match stx with
-  | `(doFor| for $[$_ : ]? $_:ident in $_ do $_) =>
+  | `(doFor| for $[$_ : ]? $_:ident in $_ $[$_inv:doForInvariant]? do $_) =>
     -- This is the target form of the expander, handled by `elabDoFor` below.
     Macro.throwUnsupported
-  | `(doFor| for%$tk $decls:doForDecl,* do $body) =>
+  | `(doFor| for%$tk $decls:doForDecl,* $[$inv:doForInvariant]? do $body) =>
+    if let some inv := inv then
+      Macro.throwErrorAt inv "The `invariant` clause is only supported on `for x in xs do …` \
+        with a single identifier binder."
     let decls := decls.getElems
     let `(doForDecl| $[$h? : ]? $pattern in $xs) := decls[0]! | Macro.throwUnsupported
     let mut doElems := #[]
@@ -78,8 +82,51 @@ open Lean.Meta
     `(doElem| do $doElems*)
   | _ => Macro.throwUnsupported
 
+/-- Rebuild the already-elaborated `forIn` loop as a `ForIn.forInWithInvariant` call carrying the
+`invariant` clause. Walks the state tuple `preS` in state order to recover the loop's mutable
+variables so the invariant can name them; the early-return position becomes a wildcard. -/
+private def mkForInWithInvariant (invClause : Syntax) (h? : Option Syntax)
+    (xs preS body σ : Expr) (mi : MonadInfo) : DoElabM Expr := do
+  if h?.isSome then
+    throwErrorAt invClause "The `invariant` clause is not supported together with a \
+      membership-proof binder (`for h : x in xs`)."
+  let `(doForInvariant| invariant $cursorBinder => $invBody) := invClause | throwUnsupportedSyntax
+  let mutVars := (← read).mutVars
+  let mut tuple := preS
+  let mut binders : Array Term := #[]
+  while !tuple.isAppOf ``PUnit.unit do
+    let (var, more) ←
+      if tuple.isAppOf ``Prod.mk then
+        let fst := tuple.getArg! 2
+        tuple := tuple.getArg! 3
+        pure (fst, true)
+      else
+        pure (tuple, false)
+    let binder : Term ←
+      match var.fvarId? with
+      | none => `(_)
+      | some fvarId =>
+        match mutVars.find? (·.getId == (← fvarId.getDecl).userName) with
+        | some mv => pure ⟨mv.ident.raw⟩
+        | none    => `(_)
+    binders := binders.push binder
+    unless more do break
+  let statePat : Term ← match binders with
+    | #[]  => `(_)
+    | #[b] => pure b
+    | _    => `(⟨$binders,*⟩)
+  let stateId := mkIdentFrom cursorBinder (← mkFreshUserName `__s)
+  let invLam ← `(fun $cursorBinder $stateId:ident =>
+    match $stateId:ident with | $statePat => $invBody)
+  -- `Std.Internal.Do.ForIn.forInWithInvariant` lives downstream of this module, so it is referenced
+  -- by an unresolved name that resolves in the user's context (which imports the metatheory).
+  let call ← `($(mkIdent `Std.Internal.Do.ForIn.forInWithInvariant)
+    $(← Term.exprToSyntax xs) $(← Term.exprToSyntax preS) $(← Term.exprToSyntax body) $invLam)
+  Term.elabTermEnsuringType call (mkApp mi.m σ)
+
 @[builtin_doElem_elab Lean.Parser.Term.doFor] def elabDoFor : DoElab := fun stx dec => do
-  let `(doFor| for%$tk $[$h? : ]? $x:ident in $xs do $body) := stx | throwUnsupportedSyntax
+  let `(doFor| for%$tk $[$h? : ]? $x:ident in $xs $[$inv?:doForInvariant]? do $body) := stx
+    | throwUnsupportedSyntax
   let dec ← dec.ensureUnitAt tk
   checkMutVarsForShadowing #[x]
   let uα ← mkFreshLevelMVar
@@ -176,7 +223,9 @@ open Lean.Meta
     -- Elaborate the loop body, which must have result type `PUnit`, just like the whole `for` loop.
     elabDoSeq body { dec with k := continueCont, kind := .duplicable }
 
-  let forIn := mkApp app body
+  let forIn ← match inv? with
+    | none => pure (mkApp app body)
+    | some invClause => mkForInWithInvariant invClause h? xs preS body σ mi
 
   let γ := (← read).doBlockResultType
   let rest ←
