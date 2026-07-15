@@ -129,10 +129,17 @@ def declId := leading_parser
 -- @[builtin_doc] -- FIXME: suppress the hover
 def declSig := leading_parser
   many (ppSpace >> (Term.binderIdent <|> Term.bracketedBinder)) >> Term.typeSpec
+/-- The `require P` precondition clause of a `def` contract. -/
+def requireClause := leading_parser
+  ppDedent (ppLine >> "require " >> termParser)
+/-- The `ensures b => Q` postcondition clause of a `def` contract, binding the result `b`. -/
+def ensuresClause := leading_parser
+  ppDedent (ppLine >> "ensures " >> Term.basicFun)
 /-- `optDeclSig` matches the signature of a declaration with optional type: a list of binders and then possibly `: type` -/
 -- @[builtin_doc] -- FIXME: suppress the hover
 def optDeclSig := leading_parser
-  many (ppSpace >> (Term.binderIdent <|> Term.bracketedBinder)) >> Term.optType
+  many (ppSpace >> (Term.binderIdent <|> Term.bracketedBinder)) >> Term.optType >>
+  optional requireClause >> optional ensuresClause
 /-- Right-hand side of a `:=` in a declaration, a term. -/
 def declBody : Parser :=
   /-
