@@ -131,7 +131,7 @@ def declSig := leading_parser
   many (ppSpace >> (Term.binderIdent <|> Term.bracketedBinder)) >> Term.typeSpec
 /-- The `require P` precondition clause of a `def` contract. -/
 def requireClause := leading_parser
-  ppDedent (ppLine >> nonReservedSymbol "require" >> ppSpace >> termParser)
+  ppDedent (ppLine >> nonReservedSymbol "require" >> ppSpace >> withForbidden "ensures" termParser)
 /-- The `ensures b => Q` postcondition clause of a `def` contract, binding the result `b`. -/
 def ensuresClause := leading_parser
   ppDedent (ppLine >> nonReservedSymbol "ensures" >> ppSpace >> Term.basicFun)
