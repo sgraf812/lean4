@@ -509,13 +509,22 @@ private def etaExpandEqPattern (pattern : Sym.Pattern) (eqTy : Expr) : Sym.Patte
         checkTypeMask? := none }
     (newPattern, k)
 
+/-- Whether some hypothesis of the equation type is an overlap hypothesis
+(see `Simp.isEqnThmHypothesis`), as in the wildcard-row equation of an overlapping `match`. -/
+private def hasOverlapHypothesis : Expr → Bool
+  | .forallE _ d b _ => Simp.isEqnThmHypothesis d || hasOverlapHypothesis b
+  | _ => false
+
 /--
 Create a `SpecTheorem` from a simp/equational declaration `declName : ∀ xs, lhs = rhs`, keyed on the
 LHS. Function-level equations (e.g. class projection unfold lemmas) are eta-expanded so the
 discrimination-tree key includes all arguments. Returns `none` for no-op equations whose LHS key is
-syntactically the RHS.
+syntactically the RHS, and for equations guarded by an overlap hypothesis: their LHS matches any
+call, and applying one commits the goal to that alternative with the overlap hypothesis as a
+verification condition, whereas the unfold theorem exposes the `match` for splitting.
 -/
 def mkSpecTheoremFromSimpDecl? (declName : Name) (prio : Nat) : MetaM (Option SpecTheorem) := do
+  if hasOverlapHypothesis (← getConstInfo declName).type then return none
   let (pattern, (eqTy, rhs)) ← Sym.mkPatternFromDeclWithKey declName fun body => do
     let_expr Eq eqTy lhs rhs := body | throwError "conclusion is not an equality{indentExpr body}"
     return (lhs, (eqTy, rhs))
@@ -526,20 +535,51 @@ def mkSpecTheoremFromSimpDecl? (declName : Name) (prio : Nat) : MetaM (Option Sp
   return some { pattern, proof := .global declName, kind := .simp etaArgs, priority := prio }
 
 /--
+The unfold theorem `declName.eq_def` through which a definition in a simp set's `toUnfold`
+rewrites, the spec-database counterpart of `simp`'s delta unfolding. `none` for a recursive
+definition, whose unconditional unfolding would not terminate.
+-/
+def unfoldSpecEqn? (declName : Name) : MetaM (Option Name) := do
+  if (← isRecursiveDefinition declName) then return none
+  getUnfoldEqnFor? declName (nonRec := true)
+
+/--
+The equations through which a definition registered for unfolding rewrites, paired with their
+priorities, derived from the entries `simp [declName]` would use (`mkSimpEntryOfDeclToUnfold`):
+its equation lemmas at `prio`, and for a `toUnfold` entry the unfold theorem `declName.eq_def` at
+priority `0`, below every equation, so that a call with an opaque discriminant still rewrites to
+the underlying `match` expression, which `vcgen` then splits.
+-/
+def unfoldSpecCandidates (declName : Name) (prio : Nat) : MetaM (Array (Name × Nat)) := do
+  let mut result := #[]
+  for entry in ← mkSimpEntryOfDeclToUnfold declName do
+    match entry with
+    | .thm thm =>
+      if let .decl eqn .. := thm.origin then
+        result := result.push (eqn, prio)
+    | .toUnfold f =>
+      if let some eqDef ← unfoldSpecEqn? f then
+        result := result.push (eqDef, 0)
+    | .toUnfoldThms .. => pure ()
+  return result
+
+/--
 Register the equational lemmas of a `@[spec]`-annotated declaration as `.simp` entries with the
 given priority. An equational proposition is registered directly; a definition is registered via its
-equation lemmas (`getEqnsFor?`). Anything else throws, since it cannot serve as a `vcgen` spec.
+unfold equations (`unfoldSpecCandidates`). Anything else throws, since it cannot serve as a `vcgen`
+spec.
 -/
 def SpecExtension.addSimpSpecTheoremsFromConst (ext : SpecExtension) (declName : Name) (prio : Nat)
     (attrKind : AttributeKind) : MetaM Unit := do
-  let add (declName : Name) : MetaM Unit := do
+  let add (declName : Name) (prio : Nat) : MetaM Unit := do
     if let some thm ← mkSpecTheoremFromSimpDecl? declName prio then
       ext.add thm attrKind
   let info ← getConstInfo declName
   if (← isProp info.type) then
-    add declName
-  else if let some eqns ← getEqnsFor? declName then
-    eqns.forM add
+    add declName prio
+  else if info.isDefinition then
+    for (eqn, prio) in ← unfoldSpecCandidates declName prio do
+      add eqn prio
   else
     throwError "'{declName}' is neither an equational theorem nor a definition with unfold equations"
 
@@ -555,8 +595,8 @@ def specEraseProofs (declName : Name) : MetaM (Array SpecProof) := do
   let info ← getConstInfo declName
   if (← isProp info.type) then
     return #[.global declName]
-  else if let some eqns ← getEqnsFor? declName then
-    return eqns.map (.global ·)
+  else if info.isDefinition then
+    return (← unfoldSpecCandidates declName (eval_prio default)).map (.global ·.1)
   else
     return #[]
 
