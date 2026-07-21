@@ -8,6 +8,8 @@ module
 prelude
 public import Std.Tactic.Do.Syntax
 public import Std.Internal.Do
+public import Lean.Elab.Util
+import Lean.DocString.Extension
 meta import Lean.Parser.Command
 meta import Lean.Parser.Term
 import Init.Syntax
@@ -27,7 +29,7 @@ open Lean Lean.Parser.Command Std.Internal.Do
 namespace Lean.Elab.Tactic.Do
 
 /-- The identifiers bound by an explicit `(…)` binder, used to apply the definition in its spec. -/
-meta def contractBinderIdents (binder : Syntax) : Array Ident :=
+def contractBinderIdents (binder : Syntax) : Array Ident :=
   match binder with
   | `(Lean.Parser.Term.bracketedBinderF| ($ids* $[: $_]?)) =>
       ids.filterMap fun b => if b.raw.isIdent then some ⟨b.raw⟩ else none
@@ -36,8 +38,8 @@ meta def contractBinderIdents (binder : Syntax) : Array Ident :=
 
 /-- Expand a `def` carrying `require`/`ensures` clauses into the plain `def` plus a spec theorem
 `@[spec] theorem f.spec : ⦃P⦄ f args ⦃fun b => Q⦄ := by vcgen [f] with finish`. -/
-@[macro Lean.Parser.Command.declaration]
-meta def expandDefContract : Macro := fun stx => do
+@[builtin_macro Lean.Parser.Command.declaration]
+def expandDefContract : Macro := fun stx => do
   let decl := stx[1]
   unless decl.isOfKind ``Lean.Parser.Command.definition do Macro.throwUnsupported
   -- `optDeclSig = binders(0) >> optType(1) >> optional requireClause(2) >> optional ensuresClause(3)`
